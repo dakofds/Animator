@@ -2,6 +2,7 @@ mod animation;
 mod app;
 mod drawing;
 mod render;
+mod transform;
 mod ui;
 
 use app::{App, Command};
@@ -71,8 +72,10 @@ fn main() -> Result<(), String> {
                     Keycode::Right => app.next_frame(),
                     Keycode::Left => app.prev_frame(),
                     Keycode::N => app.add_frame(),
+                    Keycode::D => app.duplicate_frame(),
                     Keycode::Delete => app.remove_frame(),
                     Keycode::Z => app.undo(),
+                    Keycode::Y => app.redo(),
                     Keycode::Space => app.toggle_play(),
                     Keycode::O => app.toggle_onion(),
                     Keycode::B => app.use_pen(),

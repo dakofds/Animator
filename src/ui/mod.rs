@@ -1,4 +1,4 @@
-pub mod font;
+pub mod text;
 
 use crate::animation::layer::LayerInfo;
 
@@ -44,29 +44,49 @@ pub enum SliderId {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SelTool {
+    Lasso,
+    Free,
+    Cage,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Hit {
     Dismiss,
     Panel,
     MenuButton,
+    Undo,
+    Redo,
     Play,
     Onion,
-    RemoveFrame,
     AddFrame,
     ToggleLayers,
     Frame(usize),
     Brush,
+    SelButton,
+    SelTool(SelTool),
     Eraser,
     ColorButton,
-    Undo,
     Slider(SliderId),
     Menu(MenuAction),
     Wheel,
+    FrameDuplicate,
+    FrameDelete,
     LayerSelect(usize),
     LayerEye(usize),
     LayerAdd,
     LayerRemove,
     LayerUp,
     LayerDown,
+}
+
+#[derive(Clone)]
+pub enum Overlay {
+    None,
+    Lasso(Vec<(f32, f32)>),
+    Selection((f32, f32, f32, f32)),
+    Free { quad: [(f32, f32); 4], rot: (f32, f32) },
+    Cage([[(f32, f32); 3]; 3]),
 }
 
 #[derive(Clone, Copy)]
@@ -146,15 +166,35 @@ pub struct LayerRow {
     pub eye: Area,
 }
 
+#[derive(Clone, Copy)]
+pub struct FrameDragView {
+    pub from: usize,
+    pub target: usize,
+    pub x: f32,
+}
+
+pub struct Timeline {
+    pub cells: Vec<(usize, Area)>,
+    pub add: Area,
+}
+
 pub struct UiView<'a> {
     pub eraser: bool,
+    pub pen_active: bool,
+    pub sel_active: bool,
+    pub sel_tool: SelTool,
     pub playing: bool,
     pub onion: bool,
     pub frames: usize,
     pub current: usize,
+    pub can_undo: bool,
+    pub can_redo: bool,
     pub menu_open: bool,
     pub picker_open: bool,
     pub layers_open: bool,
+    pub flyout_open: bool,
+    pub frame_menu: Option<f32>,
+    pub frame_drag: Option<FrameDragView>,
     pub hue: f32,
     pub sat: f32,
     pub val: f32,
@@ -168,24 +208,28 @@ pub struct UiView<'a> {
 
 pub struct Ui {
     pub scale: f32,
+    pub width: f32,
     pub top_h: f32,
     pub side_w: f32,
+    pub separators: [f32; 4],
     pub menu_btn: Area,
+    pub undo_btn: Area,
+    pub redo_btn: Area,
     pub play: Area,
-    pub onion_btn: Area,
-    pub remove_btn: Area,
-    pub add_btn: Area,
     pub layers_btn: Area,
-    pub timeline: Area,
+    pub timeline_area: Area,
     pub brush: Area,
+    pub sel_btn: Area,
     pub eraser: Area,
     pub color: Area,
     pub preview: Area,
-    pub undo: Area,
+    pub onion_btn: Area,
     pub size_slider: Slider,
     pub opacity_slider: Slider,
     pub menu_panel: Area,
     pub menu_items: Vec<MenuItem>,
+    pub flyout_panel: Area,
+    pub flyout_items: Vec<(SelTool, &'static str, Area)>,
     pub picker: Picker,
     pub layers_panel: Area,
 }
@@ -193,44 +237,52 @@ pub struct Ui {
 impl Ui {
     pub fn new(width: f32, height: f32, scale: f32) -> Self {
         let u = scale;
-        let top_h = 56.0 * u;
-        let pad = 10.0 * u;
-        let gap = 6.0 * u;
-        let btn = 44.0 * u;
+        let top_h = 52.0 * u;
+        let pad = 8.0 * u;
+        let gap = 4.0 * u;
+        let btn = 40.0 * u;
+        let group = 12.0 * u;
         let by = (top_h - btn) / 2.0;
 
-        let menu_btn = Area::new(pad, by, btn, btn);
-        let play = Area::new(menu_btn.x + btn + gap, by, btn, btn);
-        let onion_btn = Area::new(play.x + btn + gap, by, btn, btn);
+        let mut x = pad;
+        let menu_btn = Area::new(x, by, btn, btn);
+        x += btn + group;
+        let sep0 = x - group / 2.0;
+        let undo_btn = Area::new(x, by, btn, btn);
+        x += btn + gap;
+        let redo_btn = Area::new(x, by, btn, btn);
+        x += btn + group;
+        let sep1 = x - group / 2.0;
+        let play = Area::new(x, by, btn, btn);
+        x += btn + group;
+        let sep2 = x - group / 2.0;
 
         let layers_btn = Area::new(width - pad - btn, by, btn, btn);
-        let add_btn = Area::new(layers_btn.x - gap - btn, by, btn, btn);
-        let remove_btn = Area::new(add_btn.x - gap - btn, by, btn, btn);
+        let sep3 = layers_btn.x - group / 2.0;
+        let timeline_area = Area::new(x, 0.0, (layers_btn.x - group - x).max(0.0), top_h);
 
-        let tl_x = onion_btn.x + btn + 16.0 * u;
-        let tl_end = remove_btn.x - 16.0 * u;
-        let timeline = Area::new(tl_x, 0.0, (tl_end - tl_x).max(0.0), top_h);
-
-        let side_w = 72.0 * u;
-        let sb = 48.0 * u;
+        let side_w = 64.0 * u;
+        let sb = 44.0 * u;
         let sbx = (side_w - sb) / 2.0;
-        let mut y = top_h + 10.0 * u;
+        let mut y = top_h + 8.0 * u;
         let brush = Area::new(sbx, y, sb, sb);
+        y += sb + gap;
+        let sel_btn = Area::new(sbx, y, sb, sb);
         y += sb + gap;
         let eraser = Area::new(sbx, y, sb, sb);
         y += sb + gap;
         let color = Area::new(sbx, y, sb, sb);
         y += sb + gap;
-        let pv = 40.0 * u;
+        let pv = 36.0 * u;
         let preview = Area::new((side_w - pv) / 2.0, y, pv, pv);
-        y += pv + gap;
-        let undo = Area::new(sbx, height - 10.0 * u - sb, sb, sb);
+        y += pv + gap * 2.0;
+        let onion_btn = Area::new(sbx, height - 8.0 * u - sb, sb, sb);
 
         let sliders_top = y;
-        let sliders_h = (undo.y - gap - sliders_top).max(80.0 * u);
-        let sw = 32.0 * u;
+        let sliders_h = (onion_btn.y - gap - sliders_top).max(80.0 * u);
+        let sw = 28.0 * u;
         let sx = (side_w - 2.0 * sw) / 2.0;
-        let edge = 20.0 * u;
+        let edge = 18.0 * u;
         let size_slider = Slider {
             id: SliderId::Size,
             area: Area::new(sx, sliders_top, sw, sliders_h),
@@ -244,20 +296,46 @@ impl Ui {
             vertical: true,
         };
 
-        let entries: [(Option<MenuAction>, &'static str); 6] = [
-            (Some(MenuAction::New), "NOVO"),
-            (Some(MenuAction::Open), "ABRIR"),
-            (Some(MenuAction::Save), "SALVAR"),
-            (None, "IMPORTAR IMAGEM"),
-            (None, "EXPORTAR"),
-            (Some(MenuAction::Quit), "SAIR"),
+        let fw = 236.0 * u;
+        let fi_h = 40.0 * u;
+        let fpad = 4.0 * u;
+        let flyout_panel = Area::new(side_w + 4.0 * u, sel_btn.y, fw, 3.0 * fi_h + 2.0 * fpad);
+        let tools: [(SelTool, &'static str); 3] = [
+            (SelTool::Lasso, "Laço"),
+            (SelTool::Free, "Transformação livre"),
+            (SelTool::Cage, "Transformação em gaiola"),
         ];
-        let item_h = 44.0 * u;
-        let menu_w = 240.0 * u;
-        let mpad = 6.0 * u;
+        let flyout_items: Vec<(SelTool, &'static str, Area)> = tools
+            .iter()
+            .enumerate()
+            .map(|(i, (tool, label))| {
+                (
+                    *tool,
+                    *label,
+                    Area::new(
+                        flyout_panel.x + fpad,
+                        flyout_panel.y + fpad + i as f32 * fi_h,
+                        fw - 2.0 * fpad,
+                        fi_h,
+                    ),
+                )
+            })
+            .collect();
+
+        let entries: [(Option<MenuAction>, &'static str); 6] = [
+            (Some(MenuAction::New), "Novo"),
+            (Some(MenuAction::Open), "Abrir"),
+            (Some(MenuAction::Save), "Salvar"),
+            (None, "Importar imagem"),
+            (None, "Exportar"),
+            (Some(MenuAction::Quit), "Sair"),
+        ];
+        let item_h = 38.0 * u;
+        let menu_w = 200.0 * u;
+        let mpad = 4.0 * u;
         let menu_panel = Area::new(
             menu_btn.x,
-            top_h + 4.0 * u,
+            top_h + 2.0 * u,
             menu_w,
             entries.len() as f32 * item_h + 2.0 * mpad,
         );
@@ -276,15 +354,15 @@ impl Ui {
             })
             .collect();
 
-        let ppad = 14.0 * u;
-        let vh = 36.0 * u;
+        let ppad = 12.0 * u;
+        let vh = 30.0 * u;
         let avail = height - top_h - 16.0 * u;
-        let r = (100.0 * u)
-            .min((avail - 2.0 * ppad - 10.0 * u - vh) / 2.0)
+        let r = (96.0 * u)
+            .min((avail - 2.0 * ppad - 8.0 * u - vh) / 2.0)
             .max(40.0 * u);
         let pw = 2.0 * r + 2.0 * ppad;
-        let ph = ppad + 2.0 * r + 10.0 * u + vh + ppad;
-        let px = side_w + 8.0 * u;
+        let ph = ppad + 2.0 * r + 8.0 * u + vh + ppad;
+        let px = side_w + 6.0 * u;
         let min_y = top_h + 8.0 * u;
         let max_y = (height - ph - 8.0 * u).max(min_y);
         let py = (color.y - 20.0 * u).clamp(min_y, max_y);
@@ -297,35 +375,39 @@ impl Ui {
             r,
             value: Slider {
                 id: SliderId::Value,
-                area: Area::new(px + ppad, pcy + r + 10.0 * u, 2.0 * r, vh),
-                edge: 12.0 * u,
+                area: Area::new(px + ppad, pcy + r + 8.0 * u, 2.0 * r, vh),
+                edge: 10.0 * u,
                 vertical: false,
             },
         };
 
-        let lp_w = 220.0 * u;
+        let lp_w = 200.0 * u;
         let layers_panel = Area::new(width - lp_w, top_h, lp_w, height - top_h);
 
         Self {
             scale,
+            width,
             top_h,
             side_w,
+            separators: [sep0, sep1, sep2, sep3],
             menu_btn,
+            undo_btn,
+            redo_btn,
             play,
-            onion_btn,
-            remove_btn,
-            add_btn,
             layers_btn,
-            timeline,
+            timeline_area,
             brush,
+            sel_btn,
             eraser,
             color,
             preview,
-            undo,
+            onion_btn,
             size_slider,
             opacity_slider,
             menu_panel,
             menu_items,
+            flyout_panel,
+            flyout_items,
             picker,
             layers_panel,
         }
@@ -339,26 +421,74 @@ impl Ui {
         }
     }
 
-    pub fn timeline_cells(&self, total: usize, current: usize) -> Vec<(usize, Area)> {
+    pub fn timeline(&self, total: usize, current: usize) -> Timeline {
         let u = self.scale;
-        let c = 40.0 * u;
-        let g = 6.0 * u;
-        let fit = (((self.timeline.w + g) / (c + g)).floor() as usize).max(1);
+        let cw = 20.0 * u;
+        let ch = 34.0 * u;
+        let g = 4.0 * u;
+        let add_w = 34.0 * u;
+        let add_gap = 8.0 * u;
+        let usable = (self.timeline_area.w - add_w - add_gap).max(0.0);
+        let fit = (((usable + g) / (cw + g)).floor() as usize).max(1);
         let vis = fit.min(total);
         let first = if total <= vis {
             0
         } else {
             current.saturating_sub(vis / 2).min(total - vis)
         };
-        let y = (self.top_h - c) / 2.0;
-        (0..vis)
+        let y = (self.top_h - ch) / 2.0;
+        let cells = (0..vis)
             .map(|k| {
                 (
                     first + k,
-                    Area::new(self.timeline.x + k as f32 * (c + g), y, c, c),
+                    Area::new(self.timeline_area.x + k as f32 * (cw + g), y, cw, ch),
                 )
             })
-            .collect()
+            .collect();
+        let add_x = self.timeline_area.x + vis as f32 * (cw + g) - g + add_gap;
+        Timeline {
+            cells,
+            add: Area::new(add_x, y, add_w, ch),
+        }
+    }
+
+    pub fn frame_target(&self, total: usize, current: usize, x: f32) -> usize {
+        let tl = self.timeline(total, current);
+        tl.cells
+            .iter()
+            .min_by(|a, b| {
+                (a.1.cx() - x)
+                    .abs()
+                    .partial_cmp(&(b.1.cx() - x).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(i, _)| *i)
+            .unwrap_or(current)
+    }
+
+    pub fn frame_menu_layout(&self, anchor_x: f32) -> (Area, Vec<(Hit, &'static str, Area)>) {
+        let u = self.scale;
+        let w = 160.0 * u;
+        let item_h = 38.0 * u;
+        let pad = 4.0 * u;
+        let min_x = 4.0 * u;
+        let max_x = (self.width - w - 4.0 * u).max(min_x);
+        let x = (anchor_x - w / 2.0).clamp(min_x, max_x);
+        let y = self.top_h + 2.0 * u;
+        let panel = Area::new(x, y, w, 2.0 * item_h + 2.0 * pad);
+        let items = vec![
+            (
+                Hit::FrameDuplicate,
+                "Duplicar frame",
+                Area::new(x + pad, y + pad, w - 2.0 * pad, item_h),
+            ),
+            (
+                Hit::FrameDelete,
+                "Excluir frame",
+                Area::new(x + pad, y + pad + item_h, w - 2.0 * pad, item_h),
+            ),
+        ];
+        (panel, items)
     }
 
     pub fn layer_rows(&self, count: usize, active: usize) -> Vec<LayerRow> {
@@ -367,9 +497,9 @@ impl Ui {
         }
         let u = self.scale;
         let p = self.layers_panel;
-        let row_h = 44.0 * u;
-        let list_top = p.y + 44.0 * u;
-        let list_bottom = p.y + p.h - 60.0 * u;
+        let row_h = 38.0 * u;
+        let list_top = p.y + 40.0 * u;
+        let list_bottom = p.y + p.h - 52.0 * u;
         let max_rows = (((list_bottom - list_top) / row_h).floor() as usize).max(1);
         let shown = count.min(max_rows);
         let active_row = count - 1 - active.min(count - 1);
@@ -383,12 +513,12 @@ impl Ui {
                 let row = first + k;
                 let index = count - 1 - row;
                 let area = Area::new(
-                    p.x + 8.0 * u,
+                    p.x + 6.0 * u,
                     list_top + k as f32 * row_h,
-                    p.w - 16.0 * u,
-                    row_h - 4.0 * u,
+                    p.w - 12.0 * u,
+                    row_h - 2.0 * u,
                 );
-                let eye = Area::new(area.x, area.y, 40.0 * u, area.h);
+                let eye = Area::new(area.x, area.y, 34.0 * u, area.h);
                 LayerRow { index, area, eye }
             })
             .collect()
@@ -397,10 +527,10 @@ impl Ui {
     pub fn layer_buttons(&self) -> [(Hit, Area); 4] {
         let u = self.scale;
         let p = self.layers_panel;
-        let b = 40.0 * u;
-        let pad = 12.0 * u;
+        let b = 36.0 * u;
+        let pad = 10.0 * u;
         let gap = (p.w - 2.0 * pad - 4.0 * b) / 3.0;
-        let y = p.y + p.h - 10.0 * u - b;
+        let y = p.y + p.h - 8.0 * u - b;
         let at = |i: usize| Area::new(p.x + pad + i as f32 * (b + gap), y, b, b);
         [
             (Hit::LayerAdd, at(0)),
@@ -421,6 +551,31 @@ impl Ui {
                         Some(action) => Hit::Menu(action),
                         None => Hit::Panel,
                     });
+                }
+            }
+            return Some(Hit::Panel);
+        }
+
+        if let Some(anchor) = v.frame_menu {
+            let (panel, items) = self.frame_menu_layout(anchor);
+            if !panel.contains(x, y) {
+                return Some(Hit::Dismiss);
+            }
+            for (hit, _, area) in items {
+                if area.contains(x, y) {
+                    return Some(hit);
+                }
+            }
+            return Some(Hit::Panel);
+        }
+
+        if v.flyout_open {
+            if !self.flyout_panel.contains(x, y) {
+                return Some(Hit::Dismiss);
+            }
+            for (tool, _, area) in &self.flyout_items {
+                if area.contains(x, y) {
+                    return Some(Hit::SelTool(*tool));
                 }
             }
             return Some(Hit::Panel);
@@ -447,25 +602,28 @@ impl Ui {
             if self.menu_btn.contains(x, y) {
                 return Some(Hit::MenuButton);
             }
+            if self.undo_btn.contains(x, y) {
+                return Some(Hit::Undo);
+            }
+            if self.redo_btn.contains(x, y) {
+                return Some(Hit::Redo);
+            }
             if self.play.contains(x, y) {
                 return Some(Hit::Play);
-            }
-            if self.onion_btn.contains(x, y) {
-                return Some(Hit::Onion);
-            }
-            if self.remove_btn.contains(x, y) {
-                return Some(Hit::RemoveFrame);
-            }
-            if self.add_btn.contains(x, y) {
-                return Some(Hit::AddFrame);
             }
             if self.layers_btn.contains(x, y) {
                 return Some(Hit::ToggleLayers);
             }
-            for (i, area) in self.timeline_cells(v.frames, v.current) {
-                if area.contains(x, y) {
-                    return Some(Hit::Frame(i));
+            let tl = self.timeline(v.frames, v.current);
+            let margin = 2.0 * self.scale;
+            for (i, a) in &tl.cells {
+                let wide = Area::new(a.x - margin, a.y, a.w + 2.0 * margin, a.h);
+                if wide.contains(x, y) {
+                    return Some(Hit::Frame(*i));
                 }
+            }
+            if tl.add.contains(x, y) {
+                return Some(Hit::AddFrame);
             }
             return Some(Hit::Panel);
         }
@@ -474,14 +632,17 @@ impl Ui {
             if self.brush.contains(x, y) {
                 return Some(Hit::Brush);
             }
+            if self.sel_btn.contains(x, y) {
+                return Some(Hit::SelButton);
+            }
             if self.eraser.contains(x, y) {
                 return Some(Hit::Eraser);
             }
             if self.color.contains(x, y) {
                 return Some(Hit::ColorButton);
             }
-            if self.undo.contains(x, y) {
-                return Some(Hit::Undo);
+            if self.onion_btn.contains(x, y) {
+                return Some(Hit::Onion);
             }
             if self.size_slider.area.contains(x, y) {
                 return Some(Hit::Slider(SliderId::Size));
