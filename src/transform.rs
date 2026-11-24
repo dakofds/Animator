@@ -181,6 +181,7 @@ pub fn point_in_polygon(x: f32, y: f32, poly: &[(f32, f32)]) -> bool {
     inside
 }
 
+<<<<<<< HEAD
 fn lerp_point(a: crate::drawing::stroke::Point, b: crate::drawing::stroke::Point, t: f32) -> crate::drawing::stroke::Point {
     crate::drawing::stroke::Point {
         x: a.x + (b.x - a.x) * t,
@@ -321,6 +322,8 @@ pub fn split_stroke_by_polygon(
 
 // Kept for callers that only need the old coarse metric. The lasso itself
 // now uses split_stroke_by_polygon instead.
+=======
+>>>>>>> 0382d5c740de222f462987adb9c98c8dc80d4237
 pub fn inside_fraction(stroke: &Stroke, poly: &[(f32, f32)]) -> f32 {
     if stroke.points.is_empty() {
         return 0.0;

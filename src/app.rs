@@ -3,7 +3,11 @@ use crate::animation::layer::LayerInfo;
 use crate::drawing::stroke::{Color, Point, Stroke};
 use crate::render::Renderer;
 use crate::transform::{
+<<<<<<< HEAD
     apply_affine, apply_cage, bounds_of, regular_lattice, split_stroke_by_polygon, Affine, Bounds, Lattice,
+=======
+    apply_affine, apply_cage, bounds_of, inside_fraction, regular_lattice, Affine, Bounds, Lattice,
+>>>>>>> 0382d5c740de222f462987adb9c98c8dc80d4237
 };
 use crate::ui::{FrameDragView, Hit, MenuAction, Overlay, SelTool, SliderId, Ui, UiView};
 use serde::{Deserialize, Serialize};
@@ -83,7 +87,10 @@ struct Selection {
     frame: usize,
     layer: usize,
     indices: Vec<usize>,
+<<<<<<< HEAD
     path: Vec<(f32, f32)>,
+=======
+>>>>>>> 0382d5c740de222f462987adb9c98c8dc80d4237
 }
 
 #[derive(Clone, Copy)]
@@ -328,11 +335,17 @@ impl App {
         }
         let u = self.ui.scale;
         match self.sel_tool {
+<<<<<<< HEAD
             SelTool::Lasso => match self.selection.as_ref() {
                 Some(sel) if sel.frame == self.current && sel.layer == self.active_layer => {
                     Overlay::SelectionPath(sel.path.clone())
                 }
                 _ => Overlay::None,
+=======
+            SelTool::Lasso => match self.target_rect(true) {
+                Some(r) => Overlay::Selection(r),
+                None => Overlay::None,
+>>>>>>> 0382d5c740de222f462987adb9c98c8dc80d4237
             },
             SelTool::Free => {
                 let (rect, aff) = match &self.xform {
@@ -741,6 +754,7 @@ impl App {
         if path.len() < 3 {
             return;
         }
+<<<<<<< HEAD
 
         let frame = self.current;
         let layer = self.active_layer;
@@ -791,6 +805,30 @@ impl App {
             path,
         });
         self.dirty = true;
+=======
+        let indices: Vec<usize> = {
+            let Some(strokes) = self
+                .frames
+                .get(self.current)
+                .and_then(|f| f.layers.get(self.active_layer))
+            else {
+                return;
+            };
+            strokes
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| inside_fraction(s, &path) >= 0.5)
+                .map(|(i, _)| i)
+                .collect()
+        };
+        if !indices.is_empty() {
+            self.selection = Some(Selection {
+                frame: self.current,
+                layer: self.active_layer,
+                indices,
+            });
+        }
+>>>>>>> 0382d5c740de222f462987adb9c98c8dc80d4237
     }
 
     pub fn pointer_move(&mut self, x: f32, y: f32, pressure: f32) {

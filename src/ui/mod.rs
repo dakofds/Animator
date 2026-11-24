@@ -85,7 +85,10 @@ pub enum Overlay {
     None,
     Lasso(Vec<(f32, f32)>),
     Selection((f32, f32, f32, f32)),
+<<<<<<< HEAD
     SelectionPath(Vec<(f32, f32)>),
+=======
+>>>>>>> 0382d5c740de222f462987adb9c98c8dc80d4237
     Free { quad: [(f32, f32); 4], rot: (f32, f32) },
     Cage([[(f32, f32); 3]; 3]),
 }

@@ -110,7 +110,10 @@ impl Renderer {
                 let pts = [(r.0, r.1), (r.2, r.1), (r.2, r.3), (r.0, r.3)];
                 two_tone(pm, &pts, true, true, u);
             }
+<<<<<<< HEAD
             Overlay::SelectionPath(path) => two_tone(pm, path, true, true, u),
+=======
+>>>>>>> 0382d5c740de222f462987adb9c98c8dc80d4237
             Overlay::Free { quad, rot } => {
                 two_tone(pm, quad, true, false, u);
                 let top = (
